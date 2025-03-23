@@ -1,7 +1,10 @@
+#include "../include/monitor.h"
 #include <args.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #define DEFAULT_PORT 8000
 
@@ -14,6 +17,8 @@ int main(int argc, char **argv)
 {
     struct sigaction sa;
     in_port_t        port;
+    pid_t            monitor_id;
+    int              socket_pair[2];
 
     port = DEFAULT_PORT;
 
@@ -31,7 +36,37 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    printf("port: %u\n", port);
+    if(socketpair(AF_UNIX, SOCK_STREAM, 0, socket_pair))
+    {
+        fprintf(stderr, "Error on socketpair()\n");
+        exit(EXIT_FAILURE);
+    }
+
+    monitor_id = fork();
+    if(monitor_id == -1)
+    {    // Error
+        fprintf(stderr, "Fork() error: Line %d", __LINE__);
+    }
+
+    if(monitor_id == 0)
+    {
+        // child
+        int monitor_ret;
+        close(socket_pair[1]);    // close one end
+
+        monitor_ret = start_monitor(socket_pair[0], &running);
+        exit(monitor_ret);
+    }
+    else
+    {
+        // parent
+        close(socket_pair[0]);    // close the other end
+        printf("Server running on port: %u\n", port);
+        while(running)
+        {
+        }
+    }
+    printf("Server exiting..\n");
 }
 
 void handle_signal(int signal)    // Just sets running to 0 when SIGINT is received

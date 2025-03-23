@@ -1,1 +1,1 @@
-main src/main.c src/args.c include/args.h
+main src/main.c src/args.c include/args.h src/monitor.c include/monitor.h
