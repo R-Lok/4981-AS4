@@ -40,6 +40,10 @@ int start_monitor(int child_end, const volatile sig_atomic_t *running)
             }
             exit(0);
         }
+        else
+        {
+            num_workers++;
+        }
     }
     printf("monitor exiting..\n");
     close(child_end);
