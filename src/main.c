@@ -1,4 +1,5 @@
 #include "../include/monitor.h"
+#include "../include/server.h"
 #include <args.h>
 #include <signal.h>
 #include <stdio.h>
@@ -19,6 +20,7 @@ int main(int argc, char **argv)
     in_port_t        port;
     pid_t            monitor_id;
     int              socket_pair[2];
+    int              ret;
 
     port = DEFAULT_PORT;
 
@@ -62,11 +64,12 @@ int main(int argc, char **argv)
         // parent
         close(socket_pair[0]);    // close the other end
         printf("Server running on port: %u\n", port);
-        while(running)
-        {
-        }
+
+        ret = start_server(port, socket_pair[1], &running);
     }
+    kill(0, SIGINT);    // SIGINT to all process group members (all children, grandchildren..)
     printf("Server exiting..\n");
+    return ret;
 }
 
 void handle_signal(int signal)    // Just sets running to 0 when SIGINT is received

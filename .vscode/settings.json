@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "*.ejs": "html",
-        "monitor.h": "c"
+        "monitor.h": "c",
+        "socket.h": "c"
     }
 }
