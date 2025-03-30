@@ -1,4 +1,5 @@
 #include "../include/monitor.h"
+#include "../include/worker.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/wait.h>
@@ -35,6 +36,7 @@ int start_monitor(int child_end, const volatile sig_atomic_t *running)
         {
             // int worker_res;
             printf("Worker\n");
+            start_worker(child_end, running);
             while(*running)
             {
             }

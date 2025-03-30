@@ -2,6 +2,7 @@
     "files.associations": {
         "*.ejs": "html",
         "monitor.h": "c",
-        "socket.h": "c"
+        "socket.h": "c",
+        "worker.h": "c"
     }
 }
