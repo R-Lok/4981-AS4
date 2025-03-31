@@ -113,5 +113,6 @@ int start_worker(int sock_fd, const volatile sig_atomic_t *running)
     }
 error:
     dlclose(handle);
+    printf("Worker exiting...\n");
     return ret;
 }

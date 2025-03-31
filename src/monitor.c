@@ -24,6 +24,10 @@ int start_monitor(int child_end, const volatile sig_atomic_t *running)
             waitpid(-1, &status, 0);    // blocking wait for any child
             num_workers--;
         }
+        if(*running == 0)
+        {
+            break;
+        }
 
         fork_res = fork();
         if(fork_res == -1)
