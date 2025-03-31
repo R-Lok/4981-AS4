@@ -252,7 +252,7 @@ static int validate_http_version(const char *version)
 
 static int validate_http_method(const char *method)
 {
-    if(strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0)
+    if(strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0 || strcmp(method, "POST") == 0)
     {
         return 0;
     }
