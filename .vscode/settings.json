@@ -3,6 +3,7 @@
         "*.ejs": "html",
         "monitor.h": "c",
         "socket.h": "c",
-        "worker.h": "c"
+        "worker.h": "c",
+        "string.h": "c"
     }
 }

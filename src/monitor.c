@@ -37,9 +37,6 @@ int start_monitor(int child_end, const volatile sig_atomic_t *running)
             // int worker_res;
             printf("Worker\n");
             start_worker(child_end, running);
-            while(*running)
-            {
-            }
             exit(0);
         }
         else

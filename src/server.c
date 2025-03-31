@@ -17,7 +17,6 @@ int  handle_poll_events(struct pollfd *pollfds, nfds_t *num_poll_fds, int worker
 void add_pollfd(struct pollfd *pollfds, nfds_t *num_fds, int new_fd);
 void remove_pollfd(struct pollfd *pollfds, nfds_t *num_fds, nfds_t index);
 int  handle_worker_msg(int fd);
-int  send_fd(int workers_fd, int req_fd);
 
 int start_server(in_port_t port, int workers_fd, const volatile sig_atomic_t *running)
 {
@@ -64,7 +63,7 @@ int server_loop(int sock_fd, int workers_fd, struct sockaddr_in *addr, const vol
 
     while(*running == 1)
     {
-        if(poll(pollfds, num_fds, -1))
+        if(poll(pollfds, num_fds, -1) == -1)
         {
             if(errno == EINTR)
             {
@@ -99,6 +98,7 @@ int handle_poll_events(struct pollfd *pollfds, nfds_t *num_poll_fds, int workers
                 sock_len = (socklen_t)sizeof(*addr);
 
                 new_fd = accept(sock_fd, (struct sockaddr *)addr, &sock_len);
+                printf("New client\n");
                 if(new_fd == -1)
                 {
                     if(errno == EINTR)
@@ -121,7 +121,8 @@ int handle_poll_events(struct pollfd *pollfds, nfds_t *num_poll_fds, int workers
             else
             {
                 pollfds[i].events = POLLNVAL;    // stop reading POLLIN events for now, have to handle existing request
-                if(send_fd(workers_fd, pollfds[i].fd))
+                printf("Received a client POLLIN\n");
+                if(send_fd(workers_fd, pollfds[i].fd, 1))
                 {
                     return 1;    // error sending fd to workers
                 }
@@ -129,11 +130,13 @@ int handle_poll_events(struct pollfd *pollfds, nfds_t *num_poll_fds, int workers
         }
         if(pollfds[i].revents & POLL_HUP)
         {
+            printf("Client hung up\n");
             close(pollfds[i].fd);
             continue;
         }
         if(pollfds[i].revents & POLLNVAL)
         {
+            printf("Removing invalid fd\n");
             remove_pollfd(pollfds, num_poll_fds, i);
             i--;    // Decrement to repeat this iteration as we just replaced the pollfd at this index
         }
@@ -151,6 +154,7 @@ void add_pollfd(struct pollfd *pollfds, nfds_t *num_fds, int new_fd)
     pollfds[nfd].events = POLLIN | POLL_HUP | POLLNVAL;
 
     (*num_fds)++;
+    printf("Added fd to poll arr\n");
 }
 
 void remove_pollfd(struct pollfd *pollfds, nfds_t *num_fds, nfds_t index)
@@ -173,52 +177,23 @@ void remove_pollfd(struct pollfd *pollfds, nfds_t *num_fds, nfds_t index)
 int handle_worker_msg(int fd)
 {
     int fd_num;
-    int read_res;
 
-    read_res = read_fully(fd, (char *)&fd_num, sizeof(fd_num));
-    if(read_res == -1)
+    fd_num = -1;
+
+    recv_fd(fd, &fd_num, 0);
+    if(fd_num == -1)
     {
+        perror("Failed to retrieve fd to close from workers\n");
         return 1;
     }
 
     if(close(fd_num))
     {
-        perror("failed to close fd");
-        return 1;    // failed to close fd;
+        if(errno != EBADF)
+        {                // not already closed by client
+            return 1;    // failed to close fd;
+        }
     }
-    return 0;
-}
-
-int send_fd(int workers_fd, int req_fd)
-{
-    struct msghdr   msg = {0};
-    struct iovec    io;
-    struct cmsghdr *cmsg;
-    int             fd_number;
-
-    char control[CMSG_SPACE(sizeof(int))];
-    fd_number = req_fd;
-
-    io.iov_base = &fd_number;    // store fd number in parent as part of data to send to client
-    io.iov_len  = sizeof(fd_number);
-
-    msg.msg_iov    = &io;
-    msg.msg_iovlen = 1;
-
-    msg.msg_control    = control;
-    msg.msg_controllen = sizeof(control);
-
-    cmsg             = CMSG_FIRSTHDR(&msg);
-    cmsg->cmsg_level = SOL_SOCKET;
-    cmsg->cmsg_type  = SCM_RIGHTS;
-    cmsg->cmsg_len   = CMSG_LEN(sizeof(int));
-
-    memcpy(CMSG_DATA(cmsg), &req_fd, sizeof(int));
-
-    if(sendmsg(workers_fd, &msg, 0) < 0)
-    {
-        perror("error passing file descriptor");
-        return 1;
-    }
+    printf("Closed passed client fd: %d\n", fd_num);
     return 0;
 }

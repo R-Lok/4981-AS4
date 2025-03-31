@@ -1,6 +1,9 @@
 #include "../include/worker.h"
+#include "../include/io.h"
 #include <dlfcn.h>
 #include <stdio.h>
+#include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -12,7 +15,10 @@ int start_worker(int sock_fd, const volatile sig_atomic_t *running)
     struct stat st;
     time_t      last_mod_time;
     void       *handle;
+    int         ret;
     int (*request_handler)(int);
+
+    ret = 0;
 
     printf("Hello from worker\n | %d %d\n", sock_fd, *running);
 
@@ -46,6 +52,15 @@ int start_worker(int sock_fd, const volatile sig_atomic_t *running)
     while(*running == 1)
     {
         struct stat st2;
+        int         parent_fd_num;    // File descriptor number of the resource in the main server process to send back;
+        int         client_fd;
+
+        client_fd = recv_fd(sock_fd, &parent_fd_num, 1);
+        if(client_fd == -1)
+        {
+            ret = 1;
+            goto error;
+        }
 
         if(stat(SHARED_LIB_PATH, &st2))
         {
@@ -83,8 +98,20 @@ int start_worker(int sock_fd, const volatile sig_atomic_t *running)
 #pragma GCC diagnostic pop
         }
 
-        request_handler(1);
-        sleep(3);
+        printf("Handling...client fd is %d\n", client_fd);
+        if(request_handler(client_fd))
+        {
+            perror("Server error handling client req\n");
+            goto error;
+        }
+        close(client_fd);
+        if(send_fd(sock_fd, parent_fd_num, 0))
+        {
+            perror("Failed to send fd back to main server\n");
+            goto error;
+        }
     }
-    return 0;
+error:
+    dlclose(handle);
+    return ret;
 }

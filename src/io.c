@@ -1,5 +1,6 @@
 #include "../include/io.h"
 #include <errno.h>
+#include <socket.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,4 +60,74 @@ int read_fully(int fd, char *buffer, size_t bytes_to_read)
         tread += (size_t)nread;
     }
     return 0;
+}
+
+int send_fd(int workers_fd, int req_fd, int is_pass_fd)
+{
+    struct msghdr msg = {0};
+    struct iovec  io;
+    int           fd_number;
+
+    char control[CMSG_SPACE(sizeof(int))];
+    fd_number = req_fd;
+
+    io.iov_base = &fd_number;    // store fd number in parent as part of data to send to client
+    io.iov_len  = sizeof(fd_number);
+
+    msg.msg_iov    = &io;
+    msg.msg_iovlen = 1;
+
+    if(is_pass_fd)
+    {
+        struct cmsghdr *cmsg;
+        msg.msg_control    = control;
+        msg.msg_controllen = sizeof(control);
+
+        cmsg             = CMSG_FIRSTHDR(&msg);
+        cmsg->cmsg_level = SOL_SOCKET;
+        cmsg->cmsg_type  = SCM_RIGHTS;
+        cmsg->cmsg_len   = CMSG_LEN(sizeof(int));
+        memcpy(CMSG_DATA(cmsg), &req_fd, sizeof(int));
+    }
+
+    if(sendmsg(workers_fd, &msg, 0) < 0)
+    {
+        perror("error passing file descriptor");
+        return 1;
+    }
+    return 0;
+}
+
+int recv_fd(int sock_fd, int *parent_fd_number, int is_expect_passed_fd)
+{
+    int           passed_fd;
+    struct msghdr msg = {0};
+    struct iovec  io;
+    char          control[CMSG_SPACE(sizeof(int))];
+
+    io.iov_base    = parent_fd_number;
+    io.iov_len     = sizeof(*parent_fd_number);
+    msg.msg_iov    = &io;
+    msg.msg_iovlen = 1;
+
+    msg.msg_control    = control;
+    msg.msg_controllen = sizeof(control);
+
+    if(recvmsg(sock_fd, &msg, 0) < 0)
+    {
+        perror("recvmsg");
+        return -1;
+    }
+
+    if(is_expect_passed_fd)
+    {
+        struct cmsghdr *cmsg;
+        cmsg = CMSG_FIRSTHDR(&msg);
+        if(cmsg && cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS)
+        {
+            memcpy(&passed_fd, CMSG_DATA(cmsg), sizeof(int));
+            return passed_fd;
+        }
+    }
+    return -1;
 }

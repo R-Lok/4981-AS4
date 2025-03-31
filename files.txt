@@ -1,1 +1,1 @@
-main src/main.c src/args.c include/args.h src/monitor.c include/monitor.h src/server.c include/server.h src/socket.c include/socket.h src/io.c include/io.h src/worker.c include/worker.h
+main src/main.c src/args.c include/args.h src/monitor.c include/monitor.h src/server.c include/server.h src/socket.c include/socket.h src/io.c include/io.h src/worker.c include/worker.h src/handler.c include/handler.h
