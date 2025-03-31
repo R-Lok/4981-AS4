@@ -48,6 +48,7 @@ int main(int argc, char **argv)
     if(monitor_id == -1)
     {    // Error
         fprintf(stderr, "Fork() error: Line %d", __LINE__);
+        exit(EXIT_FAILURE);
     }
 
     if(monitor_id == 0)

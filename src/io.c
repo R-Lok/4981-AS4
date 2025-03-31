@@ -1,9 +1,12 @@
 #include "../include/io.h"
 #include <errno.h>
-#include <socket.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+
+#define READ_BUF_SIZE 1024
 
 int write_fully(int fd, const char *data, size_t bytes_to_write)
 {
@@ -95,6 +98,7 @@ int send_fd(int workers_fd, int req_fd, int is_pass_fd)
         perror("error passing file descriptor");
         return 1;
     }
+    printf("sent fd\n");
     return 0;
 }
 
@@ -130,4 +134,54 @@ int recv_fd(int sock_fd, int *parent_fd_number, int is_expect_passed_fd)
         }
     }
     return -1;
+}
+
+int copy(int sock_fd, int resource_fd)
+{
+    ssize_t nread;
+    char    buf[READ_BUF_SIZE];
+
+    // While reading from the requested resource is not EOF
+    while((nread = read(resource_fd, buf, READ_BUF_SIZE)) != 0)
+    {
+        size_t twrote;
+        twrote = 0;
+
+        if(nread == -1)
+        {
+            if(errno == EINTR)
+            {
+                continue;    // continue if it was an interrupt
+            }
+            perror("read error -");
+            return 1;
+        }
+        while(twrote < (size_t)nread)
+        {    // while the amount written is less than the amount read
+            ssize_t nwrote;
+
+            nwrote = write(sock_fd, buf, (size_t)nread);    // write to socket
+            if(nwrote == -1)
+            {
+                printf("err: %d\n", errno);
+                if(errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN)
+                {    // if error due to interrupt, continue
+                    struct pollfd pfd;
+                    pfd.fd     = sock_fd;
+                    pfd.events = POLLOUT;
+                    if(poll(&pfd, 1, -1) == -1)
+                    {
+                        perror("poll");
+                        return -1;
+                    }
+                    errno = 0;
+                    continue;
+                }
+                perror("write error-");
+                return 1;
+            }
+            twrote += (size_t)nwrote;
+        }
+    }
+    return 0;
 }

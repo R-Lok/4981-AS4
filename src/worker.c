@@ -40,7 +40,7 @@ int start_worker(int sock_fd, const volatile sig_atomic_t *running)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
-    request_handler = (int (*)(int))dlsym(handle, "handle_request");
+    request_handler = (int (*)(int))dlsym(handle, "handler");
     if(!request_handler)
     {
         fprintf(stderr, "dlsym error %s\n", dlerror());
@@ -88,7 +88,7 @@ int start_worker(int sock_fd, const volatile sig_atomic_t *running)
 #pragma GCC diagnostic ignored "-Wpedantic"
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
 
-            request_handler = (int (*)())dlsym(handle, "handle_request");
+            request_handler = (int (*)())dlsym(handle, "handler");
             if(!request_handler)
             {
                 fprintf(stderr, "dlsym error %s\n", dlerror());

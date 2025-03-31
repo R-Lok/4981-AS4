@@ -1,4 +1,4 @@
-#include <../include/socket.h>
+#include "../include/socket.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -28,6 +28,8 @@ int setup_addr(struct sockaddr_in *my_addr, in_port_t port, int *err)
 int setup_socket(struct sockaddr_in *my_addr, int *err)
 {
     int socket_fd;
+    int opt;
+    opt = 1;
 
     socket_fd = socket(my_addr->sin_family, SOCK_STREAM, 0);    // NOLINT(android-cloexec-socket)
 
@@ -35,6 +37,12 @@ int setup_socket(struct sockaddr_in *my_addr, int *err)
     {
         *err = errno;
         return -1;
+    }
+
+    if(setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    {
+        *err = errno;
+        goto fail;
     }
 
     if(bind(socket_fd, (struct sockaddr *)my_addr, sizeof(struct sockaddr_in)) != 0)

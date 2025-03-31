@@ -87,6 +87,7 @@ int server_loop(int sock_fd, int workers_fd, struct sockaddr_in *addr, const vol
 
 int handle_poll_events(struct pollfd *pollfds, nfds_t *num_poll_fds, int workers_fd, int sock_fd, struct sockaddr_in *addr)
 {
+    printf("handling poll events..\n");
     for(nfds_t i = 0; i < *num_poll_fds; i++)
     {
         if(pollfds[i].revents & POLLIN)
@@ -98,7 +99,7 @@ int handle_poll_events(struct pollfd *pollfds, nfds_t *num_poll_fds, int workers
                 sock_len = (socklen_t)sizeof(*addr);
 
                 new_fd = accept(sock_fd, (struct sockaddr *)addr, &sock_len);
-                printf("New client\n");
+                printf("New client | fd: %d\n", new_fd);
                 if(new_fd == -1)
                 {
                     if(errno == EINTR)
@@ -116,11 +117,11 @@ int handle_poll_events(struct pollfd *pollfds, nfds_t *num_poll_fds, int workers
                 {
                     return 1;    // error
                 }
-                continue;
+                printf("Removing fd received from worker..\n");
             }
             else
             {
-                pollfds[i].events = POLLNVAL;    // stop reading POLLIN events for now, have to handle existing request
+                pollfds[i].events = 0;    // stop reading POLLIN events for now, have to handle existing request
                 printf("Received a client POLLIN\n");
                 if(send_fd(workers_fd, pollfds[i].fd, 1))
                 {
@@ -128,15 +129,15 @@ int handle_poll_events(struct pollfd *pollfds, nfds_t *num_poll_fds, int workers
                 }
             }
         }
-        if(pollfds[i].revents & POLL_HUP)
-        {
-            printf("Client hung up\n");
-            close(pollfds[i].fd);
-            continue;
-        }
+        // if(pollfds[i].revents & POLL_HUP)
+        // {
+        //     printf("Client hung up\n");
+        //     close(pollfds[i].fd);
+        //     continue;
+        // }
         if(pollfds[i].revents & POLLNVAL)
         {
-            printf("Removing invalid fd\n");
+            printf("Removing invalid fd | fd:%d | revent: %d\n", pollfds[i].fd, pollfds[i].revents);
             remove_pollfd(pollfds, num_poll_fds, i);
             i--;    // Decrement to repeat this iteration as we just replaced the pollfd at this index
         }
@@ -150,8 +151,9 @@ void add_pollfd(struct pollfd *pollfds, nfds_t *num_fds, int new_fd)
 
     nfd = *num_fds;
 
-    pollfds[nfd].fd     = new_fd;
-    pollfds[nfd].events = POLLIN | POLL_HUP | POLLNVAL;
+    pollfds[nfd].fd      = new_fd;
+    pollfds[nfd].events  = POLLIN | POLL_HUP;
+    pollfds[nfd].revents = 0;
 
     (*num_fds)++;
     printf("Added fd to poll arr\n");
