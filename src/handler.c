@@ -12,7 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define POST_URL "/database"
+#define DB_URL "/database"
 #define DB_NAME "storage"
 #define POST_SUCCESS_MSG "Success"
 
@@ -24,18 +24,20 @@ static int   validate_request(char *request, struct request_params *params);
 static int   validate_http_method(const char *method, struct request_params *params);
 static int   validate_http_version(const char *version);
 static char *get_time(void);
-static void  handle_retrieval_request(int fd, char *path, int is_get);
+static int   handle_retrieval_request(int fd, char *path, int is_get);
 static int   open_resource(char *path, int *err);
-static int   send_200_res(const int *sock_fd, const int *file_fd, const char *mime_type, off_t resource_len, const char* plaintext_msg);
+static int   send_200_res(const int *sock_fd, const int *file_fd, const char *mime_type, off_t resource_len, const char *plaintext_msg);
 static void  url_decode(char *input);
-static void  trim_queries(const char *path);
 static int   check_file_exists(char *path, int *err);
 int          handle_db_post(int fd, const char *request);
 int          get_content_length(const char *request, int *content_length);
-int          get_key_value(char *key_line, char *val_line, char *key, char *val);
+int          get_key_value(char *key_line, char *val, const char *key_name);
 int          handle_request(int fd, char *path, int method, const char *full_request);
 int          handle_post_request(int fd, char *path, const char *request);
+int          handle_db_get_head(char *query_params, int is_get, int fd);
 int          write_to_db(const char *key, const char *val);
+char        *read_from_db(const char *key);
+char        *extract_path_query(char *path, char *query_params);
 
 int handler(int client_fd)
 {
@@ -86,9 +88,7 @@ static void *handle_connection(int fd)
         send_error(fd, validate_res);
         goto fail_validate;
     }
-
-    url_decode(params.path);      // Decodes the path if it is encoded
-    trim_queries(params.path);    // trims any query arguments from the path as server does not need them
+    // trim_queries(params.path);    // trims any query arguments from the path as server does not need them
 
     // Run same method with different flag depending on GET or HEAD request
     handle_request(fd, params.path, params.method_code, request);    // need error handling
@@ -106,10 +106,7 @@ int handle_request(int fd, char *path, int method, const char *full_request)
     switch(method)
     {
         case METHOD_GET:
-            handle_retrieval_request(fd, path, method);
-            break;
         case METHOD_HEAD:
-            trim_queries(path);    // trims any query arguments from the path as server does not need them
             handle_retrieval_request(fd, path, method);
             break;
         case METHOD_POST:
@@ -305,7 +302,7 @@ static void send_error(int fd, const int code)
 {
     char  res_buf[ERR_RES_BUF_SIZE];
     char  status[RES_STATUS_BUF_SIZE];
-    char msg[BUFSIZ];
+    char  msg[BUFSIZ];
     char *time;
     time = get_time();
     switch(code)    // set status to string depending on what the status code is for the error
@@ -350,7 +347,7 @@ static void send_error(int fd, const int code)
              "HTTP/1.0 %s\r\n"
              "Date: %s\r\n"
              "Server: WL-RL\r\n"
-             "Content-length: %d\r\n"
+             "Content-length: %zu\r\n"
              "Connection: close\r\n\r\n"
              "%s",
              status,
@@ -383,29 +380,46 @@ static char *get_time(void)
     return time_str;
 }
 
-static void handle_retrieval_request(int fd, char *path, const int is_get)
+static int handle_retrieval_request(int fd, char *path, const int is_get)
 {
     int         file_fd;
     int         err;
     const char *mime_type;
     off_t       resource_size;
     int         send_200_result;
+    char       *query_params;
 
-    err = 0;
+    err          = 0;
+    query_params = NULL;
 
     // if extract path is over path limit, send 400 bad request
     if(strlen(path) > MAX_PATH_LENGTH)
     {
         send_error(fd, BAD_REQUEST);
-        return;
+        return 0;
+    }
+
+    query_params = extract_path_query(path, query_params);
+
+    if(strcmp(path, DB_URL) == 0)
+    {
+        int db_res;
+        db_res = handle_db_get_head(query_params, is_get, fd);
+
+        if(db_res == 1)
+        {
+            return 1;
+        }
     }
 
     // check path for parent directory traversals - not allowed
     if(strstr(path, "/.."))
     {
         send_error(fd, BAD_REQUEST);
-        return;
+        return 0;
     }
+
+    url_decode(path);    // Decodes the path if it is encoded
 
     file_fd = open_resource(path, &err);
     if(file_fd == -1)
@@ -413,16 +427,16 @@ static void handle_retrieval_request(int fd, char *path, const int is_get)
         if(err == ENOENT || err == ENOTDIR)    // file doesnt exist on server
         {
             send_error(fd, NOT_FOUND);
+            return 0;
         }
-        else if(err == EACCES)
+        if(err == EACCES)
         {
             send_error(fd, FORBIDDEN);
+            return 0;
         }
-        else    // it was a server error e.g. open() failed for other reasons
-        {
-            send_error(fd, INTERNAL_SERVER_ERROR);
-        }
-        return;
+        // it was a server error e.g. open() failed for other reasons
+        send_error(fd, INTERNAL_SERVER_ERROR);
+        return 1;
     }
     // printf("fd: %d\n", file_fd);
     mime_type     = get_mime_type(path);           // retrieves the appropriate value for content-type based on file path
@@ -431,7 +445,7 @@ static void handle_retrieval_request(int fd, char *path, const int is_get)
     if(resource_size == -1)
     {
         send_error(fd, INTERNAL_SERVER_ERROR);
-        goto close_fd;
+        return 1;
     }
 
     if(is_get)
@@ -445,15 +459,14 @@ static void handle_retrieval_request(int fd, char *path, const int is_get)
     if(send_200_result)
     {
         fprintf(stderr, "Error sending 200 response\n");
+        return 1;
     }
-
-close_fd:
-    close(file_fd);
+    return 0;
 }
 
 int handle_post_request(int fd, char *path, const char *request)
 {
-    int err;
+    int  err;
     char full_path[MAX_FULL_PATH_LENGTH];
 
     printf("Handling POST\n");
@@ -472,7 +485,7 @@ int handle_post_request(int fd, char *path, const char *request)
         return 0;
     }
 
-    if(strcasecmp(path, POST_URL) == 0)
+    if(strcasecmp(path, DB_URL) == 0)
     {
         int db_res;
         db_res = handle_db_post(fd, request);
@@ -549,12 +562,13 @@ int handle_db_post(int fd, const char *request)
         goto bad_req;
     }
 
-    if(get_key_value(key_line, val_line, key, val))
+    if(get_key_value(key_line, key, "key") || get_key_value(val_line, val, "value"))
     {
         goto bad_req;
     }
 
-    if(write_to_db(key, val)) {
+    if(write_to_db(key, val))
+    {
         goto bad_req;
     }
     send_200_res(&fd, NULL, "text/plain", strlen(POST_SUCCESS_MSG), POST_SUCCESS_MSG);
@@ -583,30 +597,72 @@ int write_to_db(const char *key, const char *val)
     return 0;
 }
 
-int get_key_value(char *key_line, char *val_line, char *key, char *val)
+char *read_from_db(const char *key)
+{
+    DBM  *db;
+    char *return_val;
+
+    return_val = NULL;
+    db         = dbm_open(DB_NAME, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if(!db)
+    {
+        return NULL;    // error opening database
+    }
+
+    return_val = retrieve_string(db, key);
+
+    dbm_close(db);
+
+    return return_val;
+}
+
+int handle_db_get_head(char *query_params, int is_get, int fd)
+{
+    char        keyval[POST_MAX_PAYLOAD];
+    const char *retrieved_val;
+
+    if(get_key_value(query_params, keyval, "key"))
+    {
+        printf("Client sent invalid query params for DB GET\n");
+        send_error(fd, BAD_REQUEST);
+        return 0;
+    }
+
+    url_decode(keyval);
+
+    retrieved_val = read_from_db(keyval);
+    if(!retrieved_val)
+    {
+        fprintf(stderr, "error retrieving from db\n");
+        send_error(fd, INTERNAL_SERVER_ERROR);
+        return 1;
+    }
+
+    if(is_get)
+    {
+        send_200_res(&fd, NULL, "text/plain", (off_t)strlen(retrieved_val), retrieved_val);
+    }
+    else
+    {
+        send_200_res(&fd, NULL, "text/plain", (off_t)strlen(retrieved_val), NULL);
+    }
+
+    return 0;
+}
+
+int get_key_value(char *key_line, char *val, const char *key_name)
 {
     char       *save_ptr;
     const char *keykey;
     char       *keyval;
-    const char *valkey;
-    char       *valval;
 
     keykey = strtok_r(key_line, "=", &save_ptr);
     keyval = strtok_r(NULL, "=", &save_ptr);
-    if(strcasecmp(keykey, "key") != 0 || keyval == NULL)
+    if(strcasecmp(keykey, key_name) != 0 || keyval == NULL)
     {
         return 1;    // invalid payload
     }
-
-    valkey = strtok_r(val_line, "=", &save_ptr);
-    valval = strtok_r(NULL, "=", &save_ptr);
-    if(strcasecmp(valkey, "value") != 0 || valval == NULL)
-    {
-        return 1;    // invalid payload
-    }
-
-    strlcpy(key, keyval, POST_MAX_PAYLOAD);
-    strlcpy(val, valval, POST_MAX_PAYLOAD);
+    strlcpy(val, keyval, POST_MAX_PAYLOAD);
     return 0;
 }
 
@@ -646,7 +702,7 @@ int get_content_length(const char *request, int *content_length)
     }
     printf("line: %s\n", line);
 
-    line += strlen("content-length: "); //move pointer past header;
+    line += strlen("content-length: ");    // move pointer past header;
 
     cl = strtol(line, &end_ptr, BASE_TEN);
     if(*end_ptr != '\0' || cl > POST_MAX_PAYLOAD)
@@ -727,7 +783,7 @@ static int open_resource(char *path, int *err)
     return fd;
 }
 
-//plaintext msg parameter only used if the payload is meant to be a plaintext message (only really used for post responses)
+// plaintext msg parameter only used if the payload is meant to be a plaintext message (only really used for post responses)
 static int send_200_res(const int *sock_fd, const int *file_fd, const char *mime_type, off_t resource_len, const char *plaintext_msg)
 {
     char *time;
@@ -804,14 +860,12 @@ static void url_decode(char *input)
     strlcpy(input_dupe, decoded, MAX_PATH_LENGTH);
 }
 
-static void trim_queries(const char *path)
+char *extract_path_query(char *path, char *query_params)
 {
-    char *question_mark_pos;
+    char *save_ptr;
 
-    question_mark_pos = strchr(path, '?');
+    strtok_r(path, "?", &save_ptr);
+    query_params = strtok_r(NULL, "?", &save_ptr);
 
-    if(question_mark_pos != NULL)
-    {
-        *question_mark_pos = '\0';
-    }
+    return query_params;
 }

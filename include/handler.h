@@ -25,7 +25,7 @@ This is the header file for shared library, it's just included here so you can s
 #define MAX_METHOD_LENGTH 16
 #define MAX_HTTP_VERSION_LENGTH 8
 #define OK_RES_HEADER_BUF_SIZE 1024
-#define ERR_RES_BUF_SIZE 256
+#define ERR_RES_BUF_SIZE 2048
 #define RES_STATUS_BUF_SIZE 128
 
 #define ROOT "./public"
