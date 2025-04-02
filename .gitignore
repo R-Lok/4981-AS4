@@ -479,3 +479,5 @@ sanitizers.txt
 CMakeLists.txt
 
 build/
+
+*.db

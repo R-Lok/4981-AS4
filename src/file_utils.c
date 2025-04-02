@@ -1,4 +1,5 @@
 #include "../include/file_utils.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,4 +62,13 @@ char *get_mime_type(const char *path)
         strlcpy(type, "text/plain", MIME_TYPE_BUF_SIZE);
     }
     return type;
+}
+
+void to_lowercase(char *str)
+{
+    while(*str)
+    {
+        *str = (char)tolower((unsigned char)*str);
+        str++;
+    }
 }

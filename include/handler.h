@@ -18,6 +18,7 @@ This is the header file for shared library, it's just included here so you can s
 
 #define METHOD_HEAD 0
 #define METHOD_GET 1
+#define METHOD_POST 2
 
 #define MAX_PATH_LENGTH 4096
 #define MAX_FULL_PATH_LENGTH 4200
@@ -28,6 +29,7 @@ This is the header file for shared library, it's just included here so you can s
 #define RES_STATUS_BUF_SIZE 128
 
 #define ROOT "./public"
+#define POST_MAX_PAYLOAD 1024
 
 struct request_params
 {
@@ -35,6 +37,8 @@ struct request_params
     char method[MAX_METHOD_LENGTH + 1];
     // cppcheck-suppress unusedStructMember
     char path[MAX_FULL_PATH_LENGTH + 1];
+    // cppcheck-suppress unusedStructMember
+    int method_code;
 };
 
 int handler(int client_fd);

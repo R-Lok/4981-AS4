@@ -1,4 +1,5 @@
 #include "../include/handler.h"
+#include "../include/db.h"
 #include "../include/file_utils.h"
 #include "../include/io.h"
 #include "../include/socket.h"
@@ -11,19 +12,30 @@
 #include <time.h>
 #include <unistd.h>
 
+#define POST_URL "/database"
+#define DB_NAME "storage"
+#define POST_SUCCESS_MSG "Success"
+
 static void *handle_connection(int fd);
 static char *read_request(int fd, int *error);
 static int   check_complete(char *buffer, size_t buffer_len);
 static void  send_error(int fd, int code);
 static int   validate_request(char *request, struct request_params *params);
-static int   validate_http_method(const char *method);
+static int   validate_http_method(const char *method, struct request_params *params);
 static int   validate_http_version(const char *version);
 static char *get_time(void);
-static void  handle_request(int fd, char *path, int is_get);
+static void  handle_retrieval_request(int fd, char *path, int is_get);
 static int   open_resource(char *path, int *err);
-static int   send_200_res(const int *sock_fd, const int *file_fd, const char *mime_type, off_t resource_len);
+static int   send_200_res(const int *sock_fd, const int *file_fd, const char *mime_type, off_t resource_len, const char* plaintext_msg);
 static void  url_decode(char *input);
 static void  trim_queries(const char *path);
+static int   check_file_exists(char *path, int *err);
+int          handle_db_post(int fd, const char *request);
+int          get_content_length(const char *request, int *content_length);
+int          get_key_value(char *key_line, char *val_line, char *key, char *val);
+int          handle_request(int fd, char *path, int method, const char *full_request);
+int          handle_post_request(int fd, char *path, const char *request);
+int          write_to_db(const char *key, const char *val);
 
 int handler(int client_fd)
 {
@@ -66,7 +78,7 @@ static void *handle_connection(int fd)
         }
         goto end;
     }
-    printf("%s\n", request);
+    printf("%s\n -------------------------\n", request);
 
     validate_res = validate_request(request, &params);
     if(validate_res)
@@ -79,19 +91,34 @@ static void *handle_connection(int fd)
     trim_queries(params.path);    // trims any query arguments from the path as server does not need them
 
     // Run same method with different flag depending on GET or HEAD request
-    if(strcmp(params.method, "GET") == 0)
-    {
-        handle_request(fd, params.path, METHOD_GET);
-    }
-    else
-    {
-        handle_request(fd, params.path, METHOD_HEAD);
-    }
+    handle_request(fd, params.path, params.method_code, request);    // need error handling
 
 fail_validate:
     free(request);
 end:
     return NULL;
+}
+
+int handle_request(int fd, char *path, int method, const char *full_request)
+{
+    int ret;
+    ret = 0;
+    switch(method)
+    {
+        case METHOD_GET:
+            handle_retrieval_request(fd, path, method);
+            break;
+        case METHOD_HEAD:
+            trim_queries(path);    // trims any query arguments from the path as server does not need them
+            handle_retrieval_request(fd, path, method);
+            break;
+        case METHOD_POST:
+            handle_post_request(fd, path, full_request);
+            break;
+        default:
+            fprintf(stderr, "error: handle_request reached default\n");
+    }
+    return ret;
 }
 
 static char *read_request(int fd, int *error)
@@ -140,7 +167,7 @@ static char *read_request(int fd, int *error)
             buffer = temp_buffer;
         }
 
-        nread = read(fd, buffer + tread, CHUNK_SIZE);
+        nread = read(fd, buffer + tread, 1);
         if(nread == -1)
         {
             if(errno == EAGAIN)
@@ -210,7 +237,7 @@ static int validate_request(char *request, struct request_params *params)
         // printf("%s\n", path);
         // printf("%s\n\n", version);
 
-        if(validate_http_version(version))    // check http version is 1.0
+        if(validate_http_version(version))    // check http version is 1.0/1.1
         {
             ret = HTTP_VERSION_NOT_SUPPORTED;
             goto end;
@@ -218,7 +245,7 @@ static int validate_request(char *request, struct request_params *params)
 
         printf("Version ok\n");    // debug statement
 
-        validate_method_res = validate_http_method(method);    // check if the request parameters are valid
+        validate_method_res = validate_http_method(method, params);    // check if the request parameters are valid
         if(validate_method_res == 1)
         {
             ret = NOT_IMPLEMENTED;
@@ -250,13 +277,24 @@ static int validate_http_version(const char *version)
     return 0;
 }
 
-static int validate_http_method(const char *method)
+static int validate_http_method(const char *method, struct request_params *params)
 {
-    if(strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0 || strcmp(method, "POST") == 0)
+    if(strcmp(method, "GET") == 0)
     {
+        params->method_code = METHOD_GET;
         return 0;
     }
-    if(strcmp(method, "POST") == 0 || strcmp(method, "PUT") == 0 || strcmp(method, "DELETE") == 0 || strcmp(method, "OPTIONS") == 0 || strcmp(method, "TRACE") == 0 || strcmp(method, "CONNECT") == 0)
+    if(strcmp(method, "HEAD") == 0)
+    {
+        params->method_code = METHOD_HEAD;
+        return 0;
+    }
+    if(strcmp(method, "POST") == 0)
+    {
+        params->method_code = METHOD_POST;
+        return 0;
+    }
+    if(strcmp(method, "PUT") == 0 || strcmp(method, "DELETE") == 0 || strcmp(method, "OPTIONS") == 0 || strcmp(method, "TRACE") == 0 || strcmp(method, "CONNECT") == 0)
     {
         return 2;
     }
@@ -267,34 +305,43 @@ static void send_error(int fd, const int code)
 {
     char  res_buf[ERR_RES_BUF_SIZE];
     char  status[RES_STATUS_BUF_SIZE];
+    char msg[BUFSIZ];
     char *time;
     time = get_time();
     switch(code)    // set status to string depending on what the status code is for the error
     {
         case BAD_REQUEST:
             strcpy(status, "400 Bad Request");
+            strcpy(msg, "Bad Request");
             break;
         case NOT_FOUND:
             strcpy(status, "404 Not found");
+            strcpy(msg, "Not Found");
             break;
         case METHOD_NOT_ALLOWED:
             strcpy(status, "405 Method Not Allowed");
+            strcpy(msg, "Method Not Allowed");
             break;
         case REQUEST_TIMEOUT:
             strcpy(status, "408 Request Timeout");
+            strcpy(msg, "Request Timed Out");
             break;
         case HTTP_VERSION_NOT_SUPPORTED:
             strcpy(status, "505 HTTP Version Not Supported");
+            strcpy(msg, "HTTP Version Not Supported");
             break;
         case NOT_IMPLEMENTED:
             strcpy(status, "501 Not Implemented");
+            strcpy(msg, "Method Not Implemented");
             break;
         case FORBIDDEN:
             strcpy(status, "403 Forbidden");
+            strcpy(msg, "Forbidden");
             break;
         case INTERNAL_SERVER_ERROR:
         default:
             strcpy(status, "500 Internal Server Error");
+            strcpy(msg, "Internal Server Error");
     }
 
     // format the response
@@ -303,9 +350,13 @@ static void send_error(int fd, const int code)
              "HTTP/1.0 %s\r\n"
              "Date: %s\r\n"
              "Server: WL-RL\r\n"
-             "Connection: close\r\n\r\n",
+             "Content-length: %d\r\n"
+             "Connection: close\r\n\r\n"
+             "%s",
              status,
-             time);
+             time,
+             strlen(msg),
+             msg);
 
     // write the error response to the socket
     write_fully(fd, res_buf, strlen(res_buf));
@@ -332,7 +383,7 @@ static char *get_time(void)
     return time_str;
 }
 
-static void handle_request(int fd, char *path, const int is_get)
+static void handle_retrieval_request(int fd, char *path, const int is_get)
 {
     int         file_fd;
     int         err;
@@ -385,11 +436,11 @@ static void handle_request(int fd, char *path, const int is_get)
 
     if(is_get)
     {
-        send_200_result = send_200_res(&fd, &file_fd, mime_type, resource_size);
+        send_200_result = send_200_res(&fd, &file_fd, mime_type, resource_size, NULL);
     }
     else
     {
-        send_200_result = send_200_res(&fd, NULL, mime_type, resource_size);
+        send_200_result = send_200_res(&fd, NULL, mime_type, resource_size, NULL);
     }
     if(send_200_result)
     {
@@ -398,6 +449,225 @@ static void handle_request(int fd, char *path, const int is_get)
 
 close_fd:
     close(file_fd);
+}
+
+int handle_post_request(int fd, char *path, const char *request)
+{
+    int err;
+    char full_path[MAX_FULL_PATH_LENGTH];
+
+    printf("Handling POST\n");
+    // if extract path is over path limit, send 400 bad request
+    if(strlen(path) > MAX_PATH_LENGTH)
+    {
+        printf("Request over max length\n");
+        send_error(fd, BAD_REQUEST);
+        return 0;
+    }
+
+    // check path for parent directory traversals - not allowed
+    if(strstr(path, "/.."))
+    {
+        send_error(fd, BAD_REQUEST);
+        return 0;
+    }
+
+    if(strcasecmp(path, POST_URL) == 0)
+    {
+        int db_res;
+        db_res = handle_db_post(fd, request);
+        if(db_res == 1)
+        {
+            return 1;
+        }
+        return 0;
+    }
+
+    snprintf(full_path, MAX_FULL_PATH_LENGTH, "%s%s", ROOT, path);
+    if(check_file_exists(full_path, &err) == 0)
+    {    // not the db path, check to return 404 or 405
+        if(err == ENOENT)
+        {
+            send_error(fd, NOT_FOUND);
+        }
+        else if(err == EACCES)
+        {
+            send_error(fd, FORBIDDEN);
+        }
+        else
+        {
+            send_error(fd, INTERNAL_SERVER_ERROR);
+            return 1;
+        }
+    }
+    else
+    {
+        send_error(fd, METHOD_NOT_ALLOWED);
+    }
+    // check if file exists
+    return 0;
+}
+
+int handle_db_post(int fd, const char *request)
+{
+    int   content_length;
+    int   get_content_length_res;
+    char *save_ptr;
+    char  payload_buf[POST_MAX_PAYLOAD + 1];
+    char *key_line;
+    char *val_line;
+    char  key[POST_MAX_PAYLOAD];
+    char  val[POST_MAX_PAYLOAD];
+
+    printf("DB POST\n");
+
+    get_content_length_res = get_content_length(request, &content_length);
+    if(get_content_length_res == 1)
+    {
+        printf("failed get content length\n");
+        goto bad_req;
+    }
+    if(get_content_length_res == -1)
+    {
+        send_error(fd, INTERNAL_SERVER_ERROR);
+        return 1;    // server error
+    }
+
+    if(read_fully(fd, payload_buf, (size_t)content_length) == -1)
+    {
+        send_error(fd, INTERNAL_SERVER_ERROR);
+        return 1;    // server error
+    }
+
+    payload_buf[content_length] = '\0';    // nul terminate
+
+    key_line = strtok_r(payload_buf, "&", &save_ptr);
+    val_line = save_ptr;
+
+    if(val_line == NULL)
+    {
+        goto bad_req;
+    }
+
+    if(get_key_value(key_line, val_line, key, val))
+    {
+        goto bad_req;
+    }
+
+    if(write_to_db(key, val)) {
+        goto bad_req;
+    }
+    send_200_res(&fd, NULL, "text/plain", strlen(POST_SUCCESS_MSG), POST_SUCCESS_MSG);
+    return 0;
+bad_req:
+    send_error(fd, BAD_REQUEST);
+    return 0;
+}
+
+int write_to_db(const char *key, const char *val)
+{
+    DBM *db;
+    db = dbm_open(DB_NAME, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if(!db)
+    {
+        return 1;    // error opening database
+    }
+
+    if(store_string(db, key, val))
+    {
+        return 1;    // failed to write to db;
+    }
+
+    dbm_close(db);
+    printf("Wrote | key: %s, value: %s | to db \n", key, val);
+    return 0;
+}
+
+int get_key_value(char *key_line, char *val_line, char *key, char *val)
+{
+    char       *save_ptr;
+    const char *keykey;
+    char       *keyval;
+    const char *valkey;
+    char       *valval;
+
+    keykey = strtok_r(key_line, "=", &save_ptr);
+    keyval = strtok_r(NULL, "=", &save_ptr);
+    if(strcasecmp(keykey, "key") != 0 || keyval == NULL)
+    {
+        return 1;    // invalid payload
+    }
+
+    valkey = strtok_r(val_line, "=", &save_ptr);
+    valval = strtok_r(NULL, "=", &save_ptr);
+    if(strcasecmp(valkey, "value") != 0 || valval == NULL)
+    {
+        return 1;    // invalid payload
+    }
+
+    strlcpy(key, keyval, POST_MAX_PAYLOAD);
+    strlcpy(val, valval, POST_MAX_PAYLOAD);
+    return 0;
+}
+
+int get_content_length(const char *request, int *content_length)
+{
+    const int SERVER_ERROR = -1;
+    const int BAD_REQ      = 1;
+    const int BASE_TEN     = 10;
+
+    char *req_dupe;
+    char *line;
+    char *save_ptr;
+    char *end_ptr;
+    long  cl;
+    req_dupe = strdup(request);
+    if(req_dupe == NULL)
+    {
+        fprintf(stderr, "failed to dupe request\n");
+        return SERVER_ERROR;
+    }
+
+    to_lowercase(req_dupe);
+
+    strtok_r(req_dupe, "\r\n", &save_ptr);    // method, uri, version line, not needed
+
+    while((line = strtok_r(NULL, "\r\n", &save_ptr)))
+    {
+        if(strstr(line, "content-length:"))
+        {
+            break;
+        }
+    }
+
+    if(line == NULL)
+    {
+        return BAD_REQ;
+    }
+    printf("line: %s\n", line);
+
+    line += strlen("content-length: "); //move pointer past header;
+
+    cl = strtol(line, &end_ptr, BASE_TEN);
+    if(*end_ptr != '\0' || cl > POST_MAX_PAYLOAD)
+    {
+        return BAD_REQ;
+    }
+    *content_length = (int)cl;
+    return 0;
+}
+
+static int check_file_exists(char *path, int *err)
+{
+    struct stat st;
+
+    if(stat(path, &st))
+    {
+        printf("path: %s\n", path);
+        *err = errno;
+        return 0;
+    }
+    return 1;
 }
 
 static int open_resource(char *path, int *err)
@@ -457,7 +727,8 @@ static int open_resource(char *path, int *err)
     return fd;
 }
 
-static int send_200_res(const int *sock_fd, const int *file_fd, const char *mime_type, off_t resource_len)
+//plaintext msg parameter only used if the payload is meant to be a plaintext message (only really used for post responses)
+static int send_200_res(const int *sock_fd, const int *file_fd, const char *mime_type, off_t resource_len, const char *plaintext_msg)
 {
     char *time;
     char  res_buf[OK_RES_HEADER_BUF_SIZE];
@@ -472,10 +743,12 @@ static int send_200_res(const int *sock_fd, const int *file_fd, const char *mime
              "Server: WL-RL\r\n"
              "Connection: close\r\n"
              "Content-Type: %s\r\n"
-             "Content-Length: %lld\r\n\r\n",
+             "Content-Length: %lld\r\n\r\n"
+             "%s",
              time,
              mime_type,
-             (long long)resource_len);
+             (long long)resource_len,
+             plaintext_msg ? plaintext_msg : "");
 
     // printf("Res: %s", res_buf);
 

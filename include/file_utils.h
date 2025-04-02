@@ -4,5 +4,6 @@
 
 off_t get_resource_size(int fd);
 char *get_mime_type(const char *path);
+void  to_lowercase(char *str);
 
 #endif
