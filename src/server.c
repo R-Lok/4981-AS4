@@ -87,7 +87,7 @@ int server_loop(int sock_fd, int workers_fd, struct sockaddr_in *addr, const vol
 
 int handle_poll_events(struct pollfd *pollfds, nfds_t *num_poll_fds, int workers_fd, int sock_fd, struct sockaddr_in *addr)
 {
-    printf("handling poll events..\n");
+    // printf("handling poll events..\n");
     for(nfds_t i = 0; i < *num_poll_fds; i++)
     {
         if(pollfds[i].revents & POLLIN)
@@ -117,12 +117,12 @@ int handle_poll_events(struct pollfd *pollfds, nfds_t *num_poll_fds, int workers
                 {
                     return 1;    // error
                 }
-                printf("Removing fd received from worker..\n");
+                // printf("Removing fd received from worker..\n");
             }
             else
             {
                 pollfds[i].events = 0;    // stop reading POLLIN events for now, have to handle existing request
-                printf("Received a client POLLIN\n");
+                // printf("Received a client POLLIN\n");
                 if(send_fd(workers_fd, pollfds[i].fd, 1))
                 {
                     return 1;    // error sending fd to workers
@@ -156,7 +156,7 @@ void add_pollfd(struct pollfd *pollfds, nfds_t *num_fds, int new_fd)
     pollfds[nfd].revents = 0;
 
     (*num_fds)++;
-    printf("Added fd to poll arr\n");
+    // printf("Added fd to poll arr\n");
 }
 
 void remove_pollfd(struct pollfd *pollfds, nfds_t *num_fds, nfds_t index)
@@ -196,6 +196,6 @@ int handle_worker_msg(int fd)
             return 1;    // failed to close fd;
         }
     }
-    printf("Closed passed client fd: %d\n", fd_num);
+    printf("Closed fd passed sent by worker: %d\n", fd_num);
     return 0;
 }

@@ -36,12 +36,12 @@ int          handle_request(int fd, char *path, int method, const char *full_req
 int          handle_post_request(int fd, char *path, const char *request);
 int          handle_db_get_head(char *query_params, int is_get, int fd);
 int          write_to_db(const char *key, const char *val);
-char        *read_from_db(const char *key);
+char        *read_from_db(const char *key, int *is_db_error);
 char        *extract_path_query(char *path, char *query_params);
 
 int handler(int client_fd)
 {
-    printf("Hello | %d\n", client_fd);
+    printf("======================\nWorker with pid %d handling request\n\n", getpid());
     handle_connection(client_fd);
     close(client_fd);
     return 0;
@@ -54,7 +54,7 @@ static void *handle_connection(int fd)
     int                   validate_res;
     struct request_params params;
 
-    printf("new connection, fd = %d\n", fd);
+    // printf("new connection, fd = %d\n", fd);
 
     // set socket connection to nonblocking so we can implement a time-out mechanism
     if(set_socket_nonblock(fd, &err))
@@ -80,7 +80,7 @@ static void *handle_connection(int fd)
         }
         goto end;
     }
-    printf("%s\n -------------------------\n", request);
+    printf("%s\n\n", request);
 
     validate_res = validate_request(request, &params);
     if(validate_res)
@@ -311,6 +311,10 @@ static void send_error(int fd, const int code)
             strcpy(status, "400 Bad Request");
             strcpy(msg, "Bad Request");
             break;
+        case DB_NOT_FOUND:
+            strcpy(status, "404 Not found");
+            strcpy(msg, "No Database Entry");
+            break;
         case NOT_FOUND:
             strcpy(status, "404 Not found");
             strcpy(msg, "Not Found");
@@ -410,6 +414,7 @@ static int handle_retrieval_request(int fd, char *path, const int is_get)
         {
             return 1;
         }
+        return 0;
     }
 
     // check path for parent directory traversals - not allowed
@@ -597,7 +602,7 @@ int write_to_db(const char *key, const char *val)
     return 0;
 }
 
-char *read_from_db(const char *key)
+char *read_from_db(const char *key, int *is_db_error)
 {
     DBM  *db;
     char *return_val;
@@ -606,6 +611,7 @@ char *read_from_db(const char *key)
     db         = dbm_open(DB_NAME, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
     if(!db)
     {
+        *is_db_error = 1;
         return NULL;    // error opening database
     }
 
@@ -620,6 +626,14 @@ int handle_db_get_head(char *query_params, int is_get, int fd)
 {
     char        keyval[POST_MAX_PAYLOAD];
     const char *retrieved_val;
+    int         db_error;
+    db_error = 0;
+
+    if(!query_params)
+    {
+        send_error(fd, BAD_REQUEST);
+        return 0;
+    }
 
     if(get_key_value(query_params, keyval, "key"))
     {
@@ -630,12 +644,17 @@ int handle_db_get_head(char *query_params, int is_get, int fd)
 
     url_decode(keyval);
 
-    retrieved_val = read_from_db(keyval);
+    retrieved_val = read_from_db(keyval, &db_error);
     if(!retrieved_val)
     {
-        fprintf(stderr, "error retrieving from db\n");
-        send_error(fd, INTERNAL_SERVER_ERROR);
-        return 1;
+        if(db_error)
+        {
+            fprintf(stderr, "error retrieving from db\n");
+            send_error(fd, INTERNAL_SERVER_ERROR);
+            return 1;
+        }
+        send_error(fd, DB_NOT_FOUND);    // No value stored in DB with this key
+        return 0;
     }
 
     if(is_get)

@@ -12,12 +12,11 @@ int start_monitor(int child_end, const volatile sig_atomic_t *running)
     int num_workers;
     num_workers = 0;
 
-    printf("child end: %d", child_end);
+    printf("Monitor started...\n");
 
     while(*running == 1)
     {
         int fork_res;
-        printf("monitor running..\n");
         if(num_workers == MAX_WORKERS)
         {
             int status;
@@ -38,8 +37,7 @@ int start_monitor(int child_end, const volatile sig_atomic_t *running)
 
         if(fork_res == 0)    // child
         {
-            // int worker_res;
-            printf("Worker\n");
+            // printf("Worker\n");
             start_worker(child_end, running);
             exit(0);
         }

@@ -7,6 +7,7 @@ This is the header file for shared library, it's just included here so you can s
 #define CHUNK_SIZE 1024
 #define TIME_OUT_SECONDS 3
 
+#define DB_NOT_FOUND 499
 #define BAD_REQUEST 400
 #define FORBIDDEN 403
 #define NOT_FOUND 404

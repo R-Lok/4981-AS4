@@ -98,7 +98,7 @@ int send_fd(int workers_fd, int req_fd, int is_pass_fd)
         perror("error passing file descriptor");
         return 1;
     }
-    printf("sent fd\n");
+    // printf("sent fd\n");
     return 0;
 }
 

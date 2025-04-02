@@ -20,7 +20,7 @@ int start_worker(int sock_fd, const volatile sig_atomic_t *running)
 
     ret = 0;
 
-    printf("Hello from worker\n | %d %d\n", sock_fd, *running);
+    printf("Hello from worker\n");
 
     if(stat(SHARED_LIB_PATH, &st))
     {
@@ -98,7 +98,7 @@ int start_worker(int sock_fd, const volatile sig_atomic_t *running)
 #pragma GCC diagnostic pop
         }
 
-        printf("Handling...client fd is %d\n", client_fd);
+        // printf("Handling...client fd is %d\n", client_fd);
         if(request_handler(client_fd))
         {
             perror("Server error handling client req\n");
