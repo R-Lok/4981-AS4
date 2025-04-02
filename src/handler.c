@@ -507,10 +507,13 @@ int handle_post_request(int fd, char *path, const char *request)
         if(err == ENOENT)
         {
             send_error(fd, NOT_FOUND);
+            return 0;
         }
         else if(err == EACCES)
         {
+            fprintf(stderr, "path: %s - %s", full_path, strerror(errno));
             send_error(fd, FORBIDDEN);
+            return 0;
         }
         else
         {
