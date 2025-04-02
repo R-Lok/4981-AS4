@@ -509,22 +509,16 @@ int handle_post_request(int fd, char *path, const char *request)
             send_error(fd, NOT_FOUND);
             return 0;
         }
-        else if(err == EACCES)
+        if(err == EACCES)
         {
             fprintf(stderr, "path: %s - %s", full_path, strerror(errno));
             send_error(fd, FORBIDDEN);
             return 0;
         }
-        else
-        {
-            send_error(fd, INTERNAL_SERVER_ERROR);
-            return 1;
-        }
+        send_error(fd, INTERNAL_SERVER_ERROR);
+        return 1;
     }
-    else
-    {
-        send_error(fd, METHOD_NOT_ALLOWED);
-    }
+    send_error(fd, METHOD_NOT_ALLOWED);
     // check if file exists
     return 0;
 }
