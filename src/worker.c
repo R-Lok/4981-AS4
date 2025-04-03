@@ -88,7 +88,7 @@ int start_worker(int sock_fd, const volatile sig_atomic_t *running, sem_t *sem)
 #pragma GCC diagnostic ignored "-Wpedantic"
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
 
-            request_handler = (int (*)())dlsym(handle, "handler");
+            request_handler = (int (*)(int, sem_t *))dlsym(handle, "handler");
             if(!request_handler)
             {
                 fprintf(stderr, "dlsym error %s\n", dlerror());

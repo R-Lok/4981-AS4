@@ -24,9 +24,12 @@ int main(int argc, char **argv)
 
     port = DEFAULT_PORT;
 
-    sa.sa_handler = handle_signal;    // Works fine on macOS/BSD
-    sigemptyset(&sa.sa_mask);         // Block no signals during handler execution
-    sa.sa_flags = 0;                  // No SA_RESTART: IO will return EINTR instead of automatically resuming
+#if defined(__linux__) && defined(__clang__)
+    _Pragma("clang diagnostic ignored \"-Wdisabled-macro-expansion\"")
+#endif
+        sa.sa_handler = handle_signal;    // Works fine on macOS/BSD
+    sigemptyset(&sa.sa_mask);             // Block no signals during handler execution
+    sa.sa_flags = 0;                      // No SA_RESTART: IO will return EINTR instead of automatically resuming
     if(sigaction(SIGINT, &sa, NULL) == -1)
     {
         perror("sigaction");

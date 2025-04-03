@@ -303,47 +303,47 @@ static void send_error(int fd, const int code)
 {
     char  res_buf[ERR_RES_BUF_SIZE];
     char  status[RES_STATUS_BUF_SIZE];
-    char  msg[BUFSIZ];
+    char  msg[RES_STATUS_BUF_SIZE] = {0};
     char *time;
     time = get_time();
     switch(code)    // set status to string depending on what the status code is for the error
     {
         case BAD_REQUEST:
             strcpy(status, "400 Bad Request");
-            strcpy(msg, "Bad Request");
+            strlcpy(msg, "Bad Request", RES_STATUS_BUF_SIZE);
             break;
         case DB_NOT_FOUND:
             strcpy(status, "404 Not found");
-            strcpy(msg, "No Database Entry");
+            strlcpy(msg, "No Database Entry", RES_STATUS_BUF_SIZE);
             break;
         case NOT_FOUND:
             strcpy(status, "404 Not found");
-            strcpy(msg, "Not Found");
+            strlcpy(msg, "Not Found", RES_STATUS_BUF_SIZE);
             break;
         case METHOD_NOT_ALLOWED:
             strcpy(status, "405 Method Not Allowed");
-            strcpy(msg, "Method Not Allowed");
+            strlcpy(msg, "Method Not Allowed", RES_STATUS_BUF_SIZE);
             break;
         case REQUEST_TIMEOUT:
             strcpy(status, "408 Request Timeout");
-            strcpy(msg, "Request Timed Out");
+            strlcpy(msg, "Request Timed Out", RES_STATUS_BUF_SIZE);
             break;
         case HTTP_VERSION_NOT_SUPPORTED:
             strcpy(status, "505 HTTP Version Not Supported");
-            strcpy(msg, "HTTP Version Not Supported");
+            strlcpy(msg, "HTTP Version Not Supported", RES_STATUS_BUF_SIZE);
             break;
         case NOT_IMPLEMENTED:
             strcpy(status, "501 Not Implemented");
-            strcpy(msg, "Method Not Implemented");
+            strlcpy(msg, "Method Not Implemented", RES_STATUS_BUF_SIZE);
             break;
         case FORBIDDEN:
             strcpy(status, "403 Forbidden");
-            strcpy(msg, "Forbidden");
+            strlcpy(msg, "Forbidden", RES_STATUS_BUF_SIZE);
             break;
         case INTERNAL_SERVER_ERROR:
         default:
             strcpy(status, "500 Internal Server Error");
-            strcpy(msg, "Internal Server Error");
+            strlcpy(msg, "Internal Server Error", RES_STATUS_BUF_SIZE);
     }
 
     // format the response
@@ -387,14 +387,16 @@ static char *get_time(void)
 
 static int handle_retrieval_request(int fd, char *path, const int is_get, sem_t *sem)
 {
-    int         file_fd;
-    int         err;
-    const char *mime_type;
-    off_t       resource_size;
-    int         send_200_result;
-    char       *query_params;
+    int   file_fd;
+    int   err;
+    char *mime_type;
+    off_t resource_size;
+    int   send_200_result;
+    char *query_params;
+    int   ret;
 
     err          = 0;
+    ret          = 0;
     query_params = NULL;
 
     // if extract path is over path limit, send 400 bad request
@@ -466,9 +468,14 @@ static int handle_retrieval_request(int fd, char *path, const int is_get, sem_t 
     if(send_200_result)
     {
         fprintf(stderr, "Error sending 200 response\n");
-        return 1;
+        ret = 1;
     }
-    return 0;
+    if(fd != -1)
+    {
+        close(fd);
+    }
+    free(mime_type);
+    return ret;
 }
 
 int handle_post_request(int fd, char *path, const char *request, sem_t *sem)
@@ -590,7 +597,11 @@ bad_req:
 int write_to_db(const char *key, const char *val)
 {
     DBM *db;
-    db = dbm_open(DB_NAME, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    char db_name[BUFSIZ];
+
+    memcpy(db_name, DB_NAME, strlen(DB_NAME) + 1);
+
+    db = dbm_open(db_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
     if(!db)
     {
         return 1;    // error opening database
@@ -610,9 +621,12 @@ char *read_from_db(const char *key, int *is_db_error)
 {
     DBM  *db;
     char *return_val;
+    char  db_name[BUFSIZ];
+
+    memcpy(db_name, DB_NAME, strlen(DB_NAME) + 1);
 
     return_val = NULL;
-    db         = dbm_open(DB_NAME, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    db         = dbm_open(db_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
     if(!db)
     {
         *is_db_error = 1;
@@ -628,9 +642,9 @@ char *read_from_db(const char *key, int *is_db_error)
 
 int handle_db_get_head(char *query_params, int is_get, int fd)
 {
-    char        keyval[POST_MAX_PAYLOAD];
-    const char *retrieved_val;
-    int         db_error;
+    char  keyval[POST_MAX_PAYLOAD];
+    char *retrieved_val;
+    int   db_error;
     db_error = 0;
 
     if(!query_params)
@@ -670,6 +684,7 @@ int handle_db_get_head(char *query_params, int is_get, int fd)
         send_200_res(&fd, NULL, "text/plain", (off_t)strlen(retrieved_val), NULL);
     }
 
+    free(retrieved_val);
     return 0;
 }
 
@@ -721,6 +736,7 @@ int get_content_length(const char *request, int *content_length)
 
     if(line == NULL)
     {
+        free(req_dupe);
         return BAD_REQ;
     }
     printf("line: %s\n", line);
@@ -730,9 +746,11 @@ int get_content_length(const char *request, int *content_length)
     cl = strtol(line, &end_ptr, BASE_TEN);
     if(*end_ptr != '\0' || cl > POST_MAX_PAYLOAD)
     {
+        free(req_dupe);
         return BAD_REQ;
     }
     *content_length = (int)cl;
+    free(req_dupe);
     return 0;
 }
 

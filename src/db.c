@@ -1,6 +1,5 @@
 #include "../include/db.h"
 #include <fcntl.h>
-#include <ndbm.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
