@@ -29,7 +29,7 @@ static int   open_resource(char *path, int *err);
 static int   send_200_res(const int *sock_fd, const int *file_fd, const char *mime_type, off_t resource_len, const char *plaintext_msg);
 static void  url_decode(char *input);
 static int   check_file_exists(char *path, int *err);
-int          handle_db_post(int fd, const char *request);
+int          handle_db_post(int fd, const char *request, sem_t *sem);
 int          get_content_length(const char *request, int *content_length);
 int          get_key_value(char *key_line, char *val, const char *key_name);
 int          handle_request(int fd, char *path, int method, const char *full_request, sem_t *sem);
@@ -495,9 +495,7 @@ int handle_post_request(int fd, char *path, const char *request, sem_t *sem)
     if(strcasecmp(path, DB_URL) == 0)
     {
         int db_res;
-        sem_wait(sem);
-        db_res = handle_db_post(fd, request);
-        sem_post(sem);
+        db_res = handle_db_post(fd, request, sem);
         if(db_res == 1)
         {
             return 1;
@@ -527,7 +525,7 @@ int handle_post_request(int fd, char *path, const char *request, sem_t *sem)
     return 0;
 }
 
-int handle_db_post(int fd, const char *request)
+int handle_db_post(int fd, const char *request, sem_t *sem)
 {
     int   content_length;
     int   get_content_length_res;
@@ -537,6 +535,7 @@ int handle_db_post(int fd, const char *request)
     char *val_line;
     char  key[POST_MAX_PAYLOAD];
     char  val[POST_MAX_PAYLOAD];
+    int   write_res;
 
     printf("DB POST\n");
 
@@ -573,7 +572,10 @@ int handle_db_post(int fd, const char *request)
         goto bad_req;
     }
 
-    if(write_to_db(key, val))
+    sem_wait(sem);
+    write_res = write_to_db(key, val);
+    sem_post(sem);
+    if(write_res)
     {
         goto bad_req;
     }
