@@ -20,7 +20,7 @@ int start_worker(int sock_fd, const volatile sig_atomic_t *running)
 
     ret = 0;
 
-    printf("Hello from worker\n");
+    printf("New Worker\n");
 
     if(stat(SHARED_LIB_PATH, &st))
     {
