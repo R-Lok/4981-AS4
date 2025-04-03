@@ -16,7 +16,7 @@
 #define DB_NAME "storage"
 #define POST_SUCCESS_MSG "Success"
 
-static int   handle_connection(int fd);
+static int   handle_connection(int fd, sem_t *sem);
 static char *read_request(int fd, int *error);
 static int   check_complete(char *buffer, size_t buffer_len);
 static void  send_error(int fd, int code);
@@ -24,7 +24,7 @@ static int   validate_request(char *request, struct request_params *params);
 static int   validate_http_method(const char *method, struct request_params *params);
 static int   validate_http_version(const char *version);
 static char *get_time(void);
-static int   handle_retrieval_request(int fd, char *path, int is_get);
+static int   handle_retrieval_request(int fd, char *path, int is_get, sem_t *sem);
 static int   open_resource(char *path, int *err);
 static int   send_200_res(const int *sock_fd, const int *file_fd, const char *mime_type, off_t resource_len, const char *plaintext_msg);
 static void  url_decode(char *input);
@@ -32,23 +32,23 @@ static int   check_file_exists(char *path, int *err);
 int          handle_db_post(int fd, const char *request);
 int          get_content_length(const char *request, int *content_length);
 int          get_key_value(char *key_line, char *val, const char *key_name);
-int          handle_request(int fd, char *path, int method, const char *full_request);
-int          handle_post_request(int fd, char *path, const char *request);
+int          handle_request(int fd, char *path, int method, const char *full_request, sem_t *sem);
+int          handle_post_request(int fd, char *path, const char *request, sem_t *sem);
 int          handle_db_get_head(char *query_params, int is_get, int fd);
 int          write_to_db(const char *key, const char *val);
 char        *read_from_db(const char *key, int *is_db_error);
 char        *extract_path_query(char *path, char *query_params);
 
-int handler(int client_fd)
+int handler(int client_fd, sem_t *sem)
 {
     int ret;
     printf("======================\nWorker with pid %d handling request\n\n", getpid());
-    ret = handle_connection(client_fd);
+    ret = handle_connection(client_fd, sem);
     close(client_fd);
     return ret;
 }
 
-static int handle_connection(int fd)
+static int handle_connection(int fd, sem_t *sem)
 {
     char                 *request;
     int                   err;
@@ -92,7 +92,7 @@ static int handle_connection(int fd)
     // trim_queries(params.path);    // trims any query arguments from the path as server does not need them
 
     // Run same method with different flag depending on GET or HEAD request
-    ret = handle_request(fd, params.path, params.method_code, request);
+    ret = handle_request(fd, params.path, params.method_code, request, sem);
 
 fail_validate:
     free(request);
@@ -100,7 +100,7 @@ end:
     return ret;
 }
 
-int handle_request(int fd, char *path, int method, const char *full_request)
+int handle_request(int fd, char *path, int method, const char *full_request, sem_t *sem)
 {
     int ret;
     ret = 0;
@@ -108,10 +108,10 @@ int handle_request(int fd, char *path, int method, const char *full_request)
     {
         case METHOD_GET:
         case METHOD_HEAD:
-            ret = handle_retrieval_request(fd, path, method);
+            ret = handle_retrieval_request(fd, path, method, sem);
             break;
         case METHOD_POST:
-            ret = handle_post_request(fd, path, full_request);
+            ret = handle_post_request(fd, path, full_request, sem);
             break;
         default:
             fprintf(stderr, "error: handle_request reached default\n");
@@ -385,7 +385,7 @@ static char *get_time(void)
     return time_str;
 }
 
-static int handle_retrieval_request(int fd, char *path, const int is_get)
+static int handle_retrieval_request(int fd, char *path, const int is_get, sem_t *sem)
 {
     int         file_fd;
     int         err;
@@ -409,8 +409,9 @@ static int handle_retrieval_request(int fd, char *path, const int is_get)
     if(strcmp(path, DB_URL) == 0)
     {
         int db_res;
+        sem_wait(sem);
         db_res = handle_db_get_head(query_params, is_get, fd);
-
+        sem_post(sem);
         if(db_res == 1)
         {
             return 1;
@@ -470,7 +471,7 @@ static int handle_retrieval_request(int fd, char *path, const int is_get)
     return 0;
 }
 
-int handle_post_request(int fd, char *path, const char *request)
+int handle_post_request(int fd, char *path, const char *request, sem_t *sem)
 {
     int  err;
     char full_path[MAX_FULL_PATH_LENGTH];
@@ -494,7 +495,9 @@ int handle_post_request(int fd, char *path, const char *request)
     if(strcasecmp(path, DB_URL) == 0)
     {
         int db_res;
+        sem_wait(sem);
         db_res = handle_db_post(fd, request);
+        sem_post(sem);
         if(db_res == 1)
         {
             return 1;

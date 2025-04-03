@@ -3,6 +3,7 @@
 /*
 This is the header file for shared library, it's just included here so you can see the code for the shared library.
 */
+#include <semaphore.h>
 
 #define CHUNK_SIZE 1024
 #define TIME_OUT_SECONDS 3
@@ -42,6 +43,6 @@ struct request_params
     int method_code;
 };
 
-int handler(int client_fd);
+int handler(int client_fd, sem_t *sem);
 
 #endif
