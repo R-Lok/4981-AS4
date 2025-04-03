@@ -16,7 +16,7 @@
 #define DB_NAME "storage"
 #define POST_SUCCESS_MSG "Success"
 
-static void *handle_connection(int fd);
+static int   handle_connection(int fd);
 static char *read_request(int fd, int *error);
 static int   check_complete(char *buffer, size_t buffer_len);
 static void  send_error(int fd, int code);
@@ -41,27 +41,28 @@ char        *extract_path_query(char *path, char *query_params);
 
 int handler(int client_fd)
 {
+    int ret;
     printf("======================\nWorker with pid %d handling request\n\n", getpid());
-    handle_connection(client_fd);
+    ret = handle_connection(client_fd);
     close(client_fd);
-    return 0;
+    return ret;
 }
 
-static void *handle_connection(int fd)
+static int handle_connection(int fd)
 {
     char                 *request;
     int                   err;
     int                   validate_res;
     struct request_params params;
+    int                   ret;
 
-    // printf("new connection, fd = %d\n", fd);
-
+    ret = 0;
     // set socket connection to nonblocking so we can implement a time-out mechanism
     if(set_socket_nonblock(fd, &err))
     {
         fprintf(stdout, "Error setting socket to non-blocking - %s\n", strerror(err));
         send_error(fd, INTERNAL_SERVER_ERROR);
-        goto end;
+        return 1;
     }
 
     // read the request from the socket
@@ -91,12 +92,12 @@ static void *handle_connection(int fd)
     // trim_queries(params.path);    // trims any query arguments from the path as server does not need them
 
     // Run same method with different flag depending on GET or HEAD request
-    handle_request(fd, params.path, params.method_code, request);    // need error handling
+    ret = handle_request(fd, params.path, params.method_code, request);
 
 fail_validate:
     free(request);
 end:
-    return NULL;
+    return ret;
 }
 
 int handle_request(int fd, char *path, int method, const char *full_request)
@@ -107,10 +108,10 @@ int handle_request(int fd, char *path, int method, const char *full_request)
     {
         case METHOD_GET:
         case METHOD_HEAD:
-            handle_retrieval_request(fd, path, method);
+            ret = handle_retrieval_request(fd, path, method);
             break;
         case METHOD_POST:
-            handle_post_request(fd, path, full_request);
+            ret = handle_post_request(fd, path, full_request);
             break;
         default:
             fprintf(stderr, "error: handle_request reached default\n");
@@ -755,8 +756,7 @@ static int open_resource(char *path, int *err)
     fd = open(full_path, O_RDONLY | O_CLOEXEC);
     if(fd == -1)
     {
-        printf("inside\n");
-        printf("errno: %d\n", errno);
+        // printf("errno: %d\n", errno);
         if(errno == ENOENT || errno == ENOTDIR)    // resource doesnt exist
         {
             printf("ENOENT\n");
@@ -783,7 +783,7 @@ static int open_resource(char *path, int *err)
         fd = open(full_path, O_RDONLY | O_CLOEXEC);
         if(fd == -1)
         {
-            perror("error opening resource -");
+            // perror("error opening resource -");
             if(errno == ENOENT)
             {
                 *err = EACCES;
