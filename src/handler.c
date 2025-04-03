@@ -577,7 +577,8 @@ int handle_db_post(int fd, const char *request, sem_t *sem)
     sem_post(sem);
     if(write_res)
     {
-        goto bad_req;
+        send_error(fd, INTERNAL_SERVER_ERROR);
+        return 1;
     }
     send_200_res(&fd, NULL, "text/plain", strlen(POST_SUCCESS_MSG), POST_SUCCESS_MSG);
     return 0;
