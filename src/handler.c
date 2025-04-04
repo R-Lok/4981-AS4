@@ -34,7 +34,7 @@ int          get_content_length(const char *request, int *content_length);
 int          get_key_value(char *key_line, char *val, const char *key_name);
 int          handle_request(int fd, char *path, int method, const char *full_request, sem_t *sem);
 int          handle_post_request(int fd, char *path, const char *request, sem_t *sem);
-int          handle_db_get_head(char *query_params, int is_get, int fd);
+int          handle_db_get_head(char *query_params, int is_get, int fd, sem_t *sem);
 int          write_to_db(const char *key, const char *val);
 char        *read_from_db(const char *key, int *is_db_error);
 char        *extract_path_query(char *path, char *query_params);
@@ -411,9 +411,7 @@ static int handle_retrieval_request(int fd, char *path, const int is_get, sem_t 
     if(strcmp(path, DB_URL) == 0)
     {
         int db_res;
-        sem_wait(sem);
-        db_res = handle_db_get_head(query_params, is_get, fd);
-        sem_post(sem);
+        db_res = handle_db_get_head(query_params, is_get, fd, sem);
         if(db_res == 1)
         {
             return 1;
@@ -640,7 +638,7 @@ char *read_from_db(const char *key, int *is_db_error)
     return return_val;
 }
 
-int handle_db_get_head(char *query_params, int is_get, int fd)
+int handle_db_get_head(char *query_params, int is_get, int fd, sem_t *sem)
 {
     char  keyval[POST_MAX_PAYLOAD];
     char *retrieved_val;
@@ -662,7 +660,9 @@ int handle_db_get_head(char *query_params, int is_get, int fd)
 
     url_decode(keyval);
 
+    sem_wait(sem);
     retrieved_val = read_from_db(keyval, &db_error);
+    sem_post(sem);
     if(!retrieved_val)
     {
         if(db_error)
