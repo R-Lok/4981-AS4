@@ -596,6 +596,7 @@ int write_to_db(const char *key, const char *val)
 {
     DBM *db;
     char db_name[BUFSIZ];
+    int  write_res;
 
     memcpy(db_name, DB_NAME, strlen(DB_NAME) + 1);
 
@@ -605,14 +606,11 @@ int write_to_db(const char *key, const char *val)
         return 1;    // error opening database
     }
 
-    if(store_string(db, key, val))
-    {
-        return 1;    // failed to write to db;
-    }
+    write_res = store_string(db, key, val);
 
     dbm_close(db);
     printf("Wrote | key: %s, value: %s | to db \n", key, val);
-    return 0;
+    return write_res;
 }
 
 char *read_from_db(const char *key, int *is_db_error)
