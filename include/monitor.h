@@ -2,6 +2,6 @@
 #define MONITOR_H
 #include <signal.h>
 
-int start_monitor(int child_end, const volatile sig_atomic_t *running);
+int start_monitor(int child_end, const volatile sig_atomic_t *running, int max_workers);
 
 #endif

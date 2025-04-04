@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #define DEFAULT_PORT 80
+#define DEFAULT_NUM_WORKERS 3
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static volatile sig_atomic_t running = 1;
@@ -18,11 +19,13 @@ int main(int argc, char **argv)
 {
     struct sigaction sa;
     in_port_t        port;
+    int              num_workers;
     pid_t            monitor_id;
     int              socket_pair[2];
     int              ret;
 
-    port = DEFAULT_PORT;
+    port        = DEFAULT_PORT;
+    num_workers = DEFAULT_NUM_WORKERS;
 
 #if defined(__linux__) && defined(__clang__)
     _Pragma("clang diagnostic ignored \"-Wdisabled-macro-expansion\"")
@@ -36,7 +39,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if(parse_port(argc, argv, &port) != 0)    // parse the port from command line args
+    if(parse_args(argc, argv, &port, &num_workers) != 0)    // parse the port from command line args
     {
         exit(EXIT_FAILURE);
     }
@@ -60,7 +63,7 @@ int main(int argc, char **argv)
         int monitor_ret;
         close(socket_pair[1]);    // close one end
 
-        monitor_ret = start_monitor(socket_pair[0], &running);
+        monitor_ret = start_monitor(socket_pair[0], &running, num_workers);
         exit(monitor_ret);
     }
     else

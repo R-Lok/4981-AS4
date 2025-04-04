@@ -7,11 +7,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define MAX_WORKERS 3
 #define SEM_NAME "/as4_sem"
 #define SEM_PERMS 0664
 
-int start_monitor(int child_end, const volatile sig_atomic_t *running)
+int start_monitor(int child_end, const volatile sig_atomic_t *running, int max_workers)
 {
     int    num_workers;
     sem_t *sem;
@@ -29,7 +28,7 @@ int start_monitor(int child_end, const volatile sig_atomic_t *running)
     while(*running == 1)
     {
         int fork_res;
-        if(num_workers == MAX_WORKERS)
+        if(num_workers == max_workers)
         {
             int status;
             waitpid(-1, &status, 0);    // blocking wait for any child
