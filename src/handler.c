@@ -352,7 +352,8 @@ static void send_error(int fd, const int code)
              "HTTP/1.0 %s\r\n"
              "Date: %s\r\n"
              "Server: WL-RL\r\n"
-             "Content-length: %zu\r\n"
+             "Content-Type: text/plain\r\n"
+             "Content-Length: %zu\r\n"
              "Connection: close\r\n\r\n"
              "%s",
              status,
